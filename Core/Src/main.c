@@ -18,7 +18,6 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
-#include "string.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -32,7 +31,6 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
-#define UART_RX_BUFFER_SIZE 32
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -41,9 +39,9 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-uint8_t UART1_RxBuffer[UART_RX_BUFFER_SIZE] = {0};
+uint8_t UART1_RxBuffer[19] = {0};
 uint16_t RxDataLen = 0;
-uint8_t rx5_data[32];
+uint8_t rx5_data[20];
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
@@ -89,7 +87,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-  HAL_Init();
+	HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -113,6 +111,9 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 19);
+  __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
+  HAL_UARTEx_ReceiveToIdle_IT(&huart5, rx5_data, 20);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -121,14 +122,34 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
-	  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, UART_RX_BUFFER_SIZE);
-	  HAL_UART_Receive(&huart5, rx5_data, 32, 500);
+
     /* USER CODE BEGIN 3 */
   }
-  memset(UART1_RxBuffer, 0, 32);
-  memset(rx5_data, 0, 32);
+  //memset(UART1_RxBuffer, 0, 32);
+
   /* USER CODE END 3 */
 }
+
+void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
+{
+	if (huart->Instance == USART1)
+	{
+    RxDataLen = Size;
+    HAL_UART_Transmit(&huart4, UART1_RxBuffer, RxDataLen, 500);
+    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 19);
+    __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
+	}
+
+	else if (huart->Instance == USART5)
+	{
+	RxDataLen = Size;
+	HAL_UART_Transmit(&huart4, rx5_data, RxDataLen, 100);
+    HAL_UARTEx_ReceiveToIdle_IT(&huart5, rx5_data, 20);
+	};
+
+}
+
+
 
 /**
   * @brief System Clock Configuration
