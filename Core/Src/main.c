@@ -18,6 +18,7 @@
 /* USER CODE END Header */
 /* Includes ------------------------------------------------------------------*/
 #include "main.h"
+#include "string.h"
 
 /* Private includes ----------------------------------------------------------*/
 /* USER CODE BEGIN Includes */
@@ -39,9 +40,6 @@
 /* USER CODE END PM */
 
 /* Private variables ---------------------------------------------------------*/
-uint8_t UART1_RxBuffer[19] = {0};
-uint16_t RxDataLen = 0;
-uint8_t rx5_data[20];
 UART_HandleTypeDef huart1;
 UART_HandleTypeDef huart2;
 UART_HandleTypeDef huart3;
@@ -49,12 +47,23 @@ UART_HandleTypeDef huart4;
 UART_HandleTypeDef huart5;
 UART_HandleTypeDef huart6;
 DMA_HandleTypeDef hdma_usart1_rx;
+DMA_HandleTypeDef hdma_usart4_rx;
+DMA_HandleTypeDef hdma_usart5_rx;
 
 /* USER CODE BEGIN PV */
 
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
+uint8_t UART1_RxBuffer[20] = {0}; //UART1: HMI
+uint8_t UART5_RxBuffer[20] = {0}; //UART5: Robot
+uint8_t UART4_RxBuffer[256] = {0}; //UART4: Laser Controller
+uint8_t buffer[200] = {0};
+uint8_t transfer[20] = {0};
+uint8_t prt[10] = {0};
+uint8_t p = 0;
+uint8_t pno[1] = {0};
+uint16_t RxDataLen = 0;
 void SystemClock_Config(void);
 static void MX_GPIO_Init(void);
 static void MX_DMA_Init(void);
@@ -87,7 +96,7 @@ int main(void)
   /* MCU Configuration--------------------------------------------------------*/
 
   /* Reset of all peripherals, Initializes the Flash interface and the Systick. */
-	HAL_Init();
+  HAL_Init();
 
   /* USER CODE BEGIN Init */
 
@@ -111,9 +120,12 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 19);
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 20); //Read from HMI
   __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
-  HAL_UARTEx_ReceiveToIdle_IT(&huart5, rx5_data, 20);
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 20); //Read from Robot
+  __HAL_DMA_DISABLE_IT(&hdma_usart5_rx, DMA_IT_HT);
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 20); //Read from Laser Controller
+  __HAL_DMA_DISABLE_IT(&hdma_usart4_rx, DMA_IT_HT);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -122,6 +134,16 @@ int main(void)
   while (1)
   {
     /* USER CODE END WHILE */
+	  if (buffer[0] != 0 )
+	  {
+		  memcpy(transfer, buffer, 20);
+		  memmove(buffer, &buffer[20], 180);
+		  memset(&buffer[180], 0, 20);
+		  pno[0] = prt[0];
+		  memmove(prt, &prt[1],9);
+		  HAL_UART_Transmit(&huart4, transfer, RxDataLen, 500);
+		  HAL_Delay(500);
+	  }
 
     /* USER CODE BEGIN 3 */
   }
@@ -134,22 +156,59 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 {
 	if (huart->Instance == USART1)
 	{
-    RxDataLen = Size;
-    HAL_UART_Transmit(&huart4, UART1_RxBuffer, RxDataLen, 500);
-    HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 19);
-    __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
+		RxDataLen = Size;
+		uint8_t i;
+		p = 1;
+		//HAL_UART_Transmit(&huart4, UART1_RxBuffer, RxDataLen, 500);
+		for (i = 0; i<10; i++)
+		{
+			if (buffer[i*20] == 0) {
+				memcpy(&buffer[i*20], UART1_RxBuffer, 20);
+				//break;
+			}
+			if (prt[i] == 0){
+				prt[i] = p;
+				break;
+			}
+		}
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 20);
+		__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
 	}
 
 	else if (huart->Instance == USART5)
 	{
-	RxDataLen = Size;
-	HAL_UART_Transmit(&huart4, rx5_data, RxDataLen, 100);
-    HAL_UARTEx_ReceiveToIdle_IT(&huart5, rx5_data, 20);
-	};
+		RxDataLen = Size;
+		uint8_t i;
+		p = 5;
+		//HAL_UART_Transmit(&huart4, rx5_data, RxDataLen, 100);
+		for (i = 0; i<10; i++)
+		{
+			if (buffer[i*20] == 0) {
+				memcpy(&buffer[i*20], UART5_RxBuffer, 20);
+				//break;
+			}
+			if (prt[i] == 0){
+				prt[i] = p;
+				break;
+			}
+		}
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 20);
+		__HAL_DMA_DISABLE_IT(&hdma_usart5_rx, DMA_IT_HT);
+	}
 
+	else if (huart->Instance == USART4)
+	{
+		RxDataLen = Size;
+		if (pno[0] == 1){
+			HAL_UART_Transmit(&huart1, UART4_RxBuffer, RxDataLen, 100);
+		}
+		else if (pno[0] == 5){
+			HAL_UART_Transmit(&huart5, UART4_RxBuffer, RxDataLen, 100);
+		}
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 256);
+		__HAL_DMA_DISABLE_IT(&hdma_usart4_rx, DMA_IT_HT);
+	}
 }
-
-
 
 /**
   * @brief System Clock Configuration
@@ -419,6 +478,12 @@ static void MX_DMA_Init(void)
   /* DMA1_Channel1_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA1_Channel1_IRQn, 0, 0);
   HAL_NVIC_EnableIRQ(DMA1_Channel1_IRQn);
+  /* DMA1_Channel2_3_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel2_3_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel2_3_IRQn);
+  /* DMA1_Channel4_5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA1_Channel4_5_IRQn, 0, 0);
+  HAL_NVIC_EnableIRQ(DMA1_Channel4_5_IRQn);
 
 }
 
