@@ -32,6 +32,8 @@
 
 /* Private define ------------------------------------------------------------*/
 /* USER CODE BEGIN PD */
+#define MAX_PACKETS     30
+#define MAX_PACKET_SIZE 200
 /* USER CODE END PD */
 
 /* Private macro -------------------------------------------------------------*/
@@ -55,11 +57,13 @@ DMA_HandleTypeDef hdma_usart5_rx;
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
-uint8_t UART1_RxBuffer[20] = {0}; //UART1: HMI
-uint8_t UART5_RxBuffer[20] = {0}; //UART5: Robot
-uint8_t UART4_RxBuffer[256] = {0}; //UART4: Laser Controller
-uint8_t buffer[200] = {0};
-uint8_t transfer[20] = {0};
+uint8_t UART1_RxBuffer[100] = {0}; //UART1: HMI
+uint8_t UART5_RxBuffer[100] = {0}; //UART5: Robot
+uint8_t UART4_RxBuffer[2000] = {0}; //UART4: Laser Controller
+uint8_t buffer[1000] = {0};
+uint8_t transfer[100] = {0};
+uint8_t uart4_packets[MAX_PACKETS][MAX_PACKET_SIZE];  // Store extracted packets
+uint16_t uart4_packet_sizes[MAX_PACKETS];      // Store actual sizes
 uint8_t prt[10] = {0};
 uint8_t p = 0;
 uint8_t pno[1] = {0};
@@ -120,11 +124,11 @@ int main(void)
   MX_USART6_UART_Init();
   /* USER CODE BEGIN 2 */
 
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 20); //Read from HMI
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 100); //Read from HMI
   __HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 20); //Read from Robot
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 100); //Read from Robot
   __HAL_DMA_DISABLE_IT(&hdma_usart5_rx, DMA_IT_HT);
-  HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 20); //Read from Laser Controller
+  HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 1000); //Read from Laser Controller
   __HAL_DMA_DISABLE_IT(&hdma_usart4_rx, DMA_IT_HT);
   /* USER CODE END 2 */
 
@@ -135,21 +139,61 @@ int main(void)
   {
     /* USER CODE END WHILE */
 	  if (buffer[0] != 0 )
-	  {
-		  memcpy(transfer, buffer, 20);
-		  memmove(buffer, &buffer[20], 180);
-		  memset(&buffer[180], 0, 20);
-		  pno[0] = prt[0];
-		  memmove(prt, &prt[1],9);
-		  HAL_UART_Transmit(&huart4, transfer, RxDataLen, 500);
-		  HAL_Delay(500);
-	  }
-
+	 	  {
+	 		  memcpy(transfer, buffer, 100);
+	 		  memmove(buffer, &buffer[100], 900);
+	 		  memset(&buffer[900], 0, 100);
+	 		  pno[0] = prt[0];
+	 		  memmove(prt, &prt[1],9);
+	 		  HAL_UART_Transmit(&huart4, transfer, RxDataLen, 500);
+	 		  //HAL_Delay(500);
+	 	  }
     /* USER CODE BEGIN 3 */
   }
   //memset(UART1_RxBuffer, 0, 32);
 
   /* USER CODE END 3 */
+}
+
+void extract_uart4_packets(uint8_t *buf, uint16_t len) {
+    int pkt_idx = 0;
+
+    for (int i = 0; i < len - 1 && pkt_idx < MAX_PACKETS; ) {
+        // Look for start marker
+        if (buf[i] == 0x5A && buf[i + 1] == 0xA5) {
+            int start = i;
+            int end = -1;
+
+            // Find next 0x5A 0xA5 (start of next packet)
+            for (int j = i + 2; j < len - 1; j++) {
+                if (buf[j] == 0x5A && buf[j + 1] == 0xA5) {
+                    end = j;
+                    break;
+                }
+            }
+
+            if (end == -1) {
+                // No more headers → rest is last packet
+                end = len;
+            }
+
+            int pkt_len = end - start;
+            if (pkt_len > 0 && pkt_len <= MAX_PACKET_SIZE) {
+                memcpy(uart4_packets[pkt_idx], &buf[start], pkt_len);
+                uart4_packet_sizes[pkt_idx] = pkt_len;
+                pkt_idx++;
+            }
+
+            i = end; // Continue from next header or end
+        } else {
+            i++; // Not a packet start, scan forward
+        }
+    }
+
+    // Clear unused sizes
+    for (int j = pkt_idx; j < MAX_PACKETS; j++) {
+        uart4_packet_sizes[j] = 0;
+    }
 }
 
 void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
@@ -162,8 +206,8 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 		//HAL_UART_Transmit(&huart4, UART1_RxBuffer, RxDataLen, 500);
 		for (i = 0; i<10; i++)
 		{
-			if (buffer[i*20] == 0) {
-				memcpy(&buffer[i*20], UART1_RxBuffer, 20);
+			if (buffer[i*100] == 0) {
+				memcpy(&buffer[i*100], UART1_RxBuffer, 100);
 				//break;
 			}
 			if (prt[i] == 0){
@@ -171,7 +215,7 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 				break;
 			}
 		}
-		HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 20);
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart1, UART1_RxBuffer, 100);
 		__HAL_DMA_DISABLE_IT(&hdma_usart1_rx, DMA_IT_HT);
 	}
 
@@ -183,8 +227,8 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 		//HAL_UART_Transmit(&huart4, rx5_data, RxDataLen, 100);
 		for (i = 0; i<10; i++)
 		{
-			if (buffer[i*20] == 0) {
-				memcpy(&buffer[i*20], UART5_RxBuffer, 20);
+			if (buffer[i*100] == 0) {
+				memcpy(&buffer[i*100], UART5_RxBuffer, 100);
 				//break;
 			}
 			if (prt[i] == 0){
@@ -192,23 +236,31 @@ void HAL_UARTEx_RxEventCallback(UART_HandleTypeDef *huart, uint16_t Size)
 				break;
 			}
 		}
-		HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 20);
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart5, UART5_RxBuffer, 100);
 		__HAL_DMA_DISABLE_IT(&hdma_usart5_rx, DMA_IT_HT);
 	}
 
 	else if (huart->Instance == USART4)
 	{
 		RxDataLen = Size;
-		if (pno[0] == 1){
-			HAL_UART_Transmit(&huart1, UART4_RxBuffer, RxDataLen, 100);
+		extract_uart4_packets(UART4_RxBuffer, Size);
+		for (int i = 0; i < MAX_PACKETS && uart4_packet_sizes[i] > 0; i++)
+		{
+			if (pno[0] == 1){
+				HAL_UART_Transmit(&huart1, uart4_packets[i], uart4_packet_sizes[i], 100);
+			}
+			else if (pno[0] == 5){
+				HAL_UART_Transmit(&huart5, uart4_packets[i], uart4_packet_sizes[i], 100);
+			}
+			else if (pno[0] == 0){
+				HAL_UART_Transmit(&huart5, uart4_packets[i], uart4_packet_sizes[i], 100);
+			}
 		}
-		else if (pno[0] == 5){
-			HAL_UART_Transmit(&huart5, UART4_RxBuffer, RxDataLen, 100);
-		}
-		HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 256);
+		HAL_UARTEx_ReceiveToIdle_DMA(&huart4, UART4_RxBuffer, 1000);
 		__HAL_DMA_DISABLE_IT(&hdma_usart4_rx, DMA_IT_HT);
 	}
 }
+
 
 /**
   * @brief System Clock Configuration
@@ -271,7 +323,7 @@ static void MX_USART1_UART_Init(void)
 
   /* USER CODE END USART1_Init 1 */
   huart1.Instance = USART1;
-  huart1.Init.BaudRate = 9600;
+  huart1.Init.BaudRate = 115200;
   huart1.Init.WordLength = UART_WORDLENGTH_8B;
   huart1.Init.StopBits = UART_STOPBITS_1;
   huart1.Init.Parity = UART_PARITY_NONE;
@@ -376,7 +428,7 @@ static void MX_USART4_UART_Init(void)
 
   /* USER CODE END USART4_Init 1 */
   huart4.Instance = USART4;
-  huart4.Init.BaudRate = 9600;
+  huart4.Init.BaudRate = 115200;
   huart4.Init.WordLength = UART_WORDLENGTH_8B;
   huart4.Init.StopBits = UART_STOPBITS_1;
   huart4.Init.Parity = UART_PARITY_NONE;
@@ -411,7 +463,7 @@ static void MX_USART5_UART_Init(void)
 
   /* USER CODE END USART5_Init 1 */
   huart5.Instance = USART5;
-  huart5.Init.BaudRate = 9600;
+  huart5.Init.BaudRate = 115200;
   huart5.Init.WordLength = UART_WORDLENGTH_8B;
   huart5.Init.StopBits = UART_STOPBITS_1;
   huart5.Init.Parity = UART_PARITY_NONE;

@@ -214,7 +214,7 @@ void USART3_6_IRQHandler(void)
   HAL_UART_IRQHandler(&huart3);
   HAL_UART_IRQHandler(&huart4);
   HAL_UART_IRQHandler(&huart5);
-  HAL_UART_IRQHandler(&huart6);(&huart6);
+  HAL_UART_IRQHandler(&huart6);
   /* USER CODE BEGIN USART3_6_IRQn 1 */
 
   /* USER CODE END USART3_6_IRQn 1 */
